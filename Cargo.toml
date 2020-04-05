@@ -32,4 +32,4 @@ path = "src/server.rs"
 
 [lib]
 path = "src/client.rs"
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib"]
