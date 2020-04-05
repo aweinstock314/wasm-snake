@@ -18,7 +18,7 @@ wee_alloc = { version = "0.4", optional = true }
 [dependencies.web-sys]
 version = "0.3"
 optional = true
-features = ["CanvasRenderingContext2d", "Document", "Element", "HtmlCanvasElement", "Location", "MessageEvent", "Node", "WebSocket", "Window", "console"]
+features = ["CanvasRenderingContext2d", "Document", "Element", "EventTarget", "HtmlCanvasElement", "Location", "KeyEvent", "KeyboardEvent", "MessageEvent", "Node", "WebSocket", "Window", "console"]
 
 [features]
 server-statically-pack-assets = []

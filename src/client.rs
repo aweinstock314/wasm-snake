@@ -1,7 +1,10 @@
 #![cfg(feature="client-deps")]
 
 use std::collections::HashMap;
-use web_sys::MessageEvent;
+//use std::sync::{Arc, Mutex};
+use std::{rc::Rc, cell::RefCell};
+use std::sync::mpsc;
+use web_sys::{KeyEvent, KeyboardEvent, MessageEvent};
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -16,7 +19,7 @@ fn log(msg: &str) {
 fn regular_polygon_path(canvas_ctx: &CanvasRenderingContext2d, n: usize, c_x: f64, c_y: f64, r_x: f64, r_y: f64, start_angle: f64) {
     canvas_ctx.begin_path();
     for i in 0..n {
-        let angle = (TAU * i as f64 / n as f64) - start_angle;
+        let angle = (TAU * i as f64 / n as f64) + start_angle;
         let x = c_x + r_x * angle.cos();
         let y = c_y + r_y * angle.sin();
         if i == 0 {
@@ -72,6 +75,23 @@ fn render_board(canvas: &HtmlCanvasElement, canvas_ctx: &CanvasRenderingContext2
     }
 }
 
+fn keyevent_to_playerinput(e: &KeyboardEvent) -> Option<PlayerInput> {
+    use PlayerInput::*;
+    use Direction::*;
+    match e.key_code() {
+        KeyEvent::DOM_VK_UP => Some(ChangeDirection(Up)),
+        KeyEvent::DOM_VK_DOWN => Some(ChangeDirection(Down)),
+        KeyEvent::DOM_VK_LEFT => Some(ChangeDirection(Left)),
+        KeyEvent::DOM_VK_RIGHT => Some(ChangeDirection(Right)),
+        _ => None,
+    }
+}
+
+enum PlayerInputDelta {
+    Started(PlayerInput),
+    Ended(PlayerInput),
+}
+
 #[wasm_bindgen]
 pub fn wasm_main() -> Result<JsValue, JsValue> {
     #[global_allocator]
@@ -101,29 +121,35 @@ pub fn wasm_main() -> Result<JsValue, JsValue> {
     let canvas_ctx: CanvasRenderingContext2d = canvas.get_context("2d").ok().flatten().and_then(|x| x.dyn_into().ok()).unwrap();
     log(&format!("{:?}", canvas_ctx));
 
-
-    /*fn animation_frame(window: web_sys::Window, gamestate: GameState, canvas: HtmlCanvasElement, canvas_ctx: CanvasRenderingContext2d, timestamp: Option<f64>) {
-        let window_ = window.clone();
-        let raf_closure = Closure::once_into_js(move |ts: f64| {
-            //log(&format!("ts: {:?}", ts));
-            render_board(&canvas, &canvas_ctx, &gamestate.board);
-            animation_frame(window_, gamestate, canvas, canvas_ctx, Some(ts));
-        });
-        window.request_animation_frame(raf_closure.as_ref().unchecked_ref());
-    }*/
-
+    // TODO: populate from websocket
+    let our_pid = PlayerId(0);
     let mut gamestate = GameState::new();
-    gamestate.place_player_near(coord(2, 2), PlayerId(0));
+    gamestate.place_player_near(coord(2, 2), our_pid);
     gamestate.board[coord(10, 2)] = Tile::Food;
+    gamestate.board[coord(15, 2)] = Tile::Food;
+
+    let mut current_inputs: HashMap<PlayerId, PlayerInput> = HashMap::new();
     let mut last_ts = None;
+    let (input_tx, input_rx) = mpsc::channel();
     let raf_closure = Closure::wrap(Box::new(move |ts: f64| {
         if let Some(ts2) = last_ts.as_mut() {
             let seconds_since_last = (ts - *ts2)/1000.0;
             let num_ticks = (seconds_since_last*TICKS_PER_SECOND) as usize;
             if num_ticks > 0 {
                 log(&format!("{:?} {:?}", seconds_since_last, num_ticks));
+                while let Ok(input) = input_rx.try_recv() {
+                    match input {
+                        PlayerInputDelta::Started(input) => { current_inputs.insert(our_pid, input); },
+                        PlayerInputDelta::Ended(input) => if current_inputs[&our_pid] == input { current_inputs.remove(&our_pid); },
+                    }
+                }
+                if let Some(PlayerInput::ChangeDirection(dir)) = current_inputs.get(&our_pid) {
+                    log(&format!("delta: {:?} {:?} {:?}", dir, dir.radians(), dir.delta_coord()));
+                }
+                log(&format!("current_inputs: {:?}", current_inputs));
                 for _ in 0..num_ticks {
-                    gamestate.tick(&HashMap::new());
+                    let events = gamestate.tick(&current_inputs);
+                    log(&format!("events: {:?}", events));
                 }
                 *ts2 = ts;
             }
@@ -134,6 +160,25 @@ pub fn wasm_main() -> Result<JsValue, JsValue> {
     }) as Box<dyn FnMut(f64)>);
     let raf_closure_jsval = raf_closure.as_ref().clone();
     raf_closure.forget();
+
+    let input_tx_ = input_tx.clone();
+    let keyup_closure = Closure::wrap(Box::new(move |e: KeyboardEvent| {
+        log(&format!("keyup {:?}", e));
+        /*if let Some(x) = keyevent_to_playerinput(&e) {
+            input_tx_.send(PlayerInputDelta::Ended(x)).unwrap();
+        }*/
+    }) as Box<dyn FnMut(_)>);
+    window.add_event_listener_with_callback("keyup", keyup_closure.as_ref().dyn_ref().unwrap()).unwrap();
+    keyup_closure.forget();
+
+    let keydown_closure = Closure::wrap(Box::new(move |e: KeyboardEvent| {
+        log(&format!("keydown {:?}", e));
+        if let Some(x) = keyevent_to_playerinput(&e) {
+            input_tx.send(PlayerInputDelta::Started(x)).unwrap();
+        }
+    }) as Box<dyn FnMut(_)>);
+    window.add_event_listener_with_callback("keydown", keydown_closure.as_ref().dyn_ref().unwrap()).unwrap();
+    keydown_closure.forget();
 
     Ok(raf_closure_jsval)
 }
