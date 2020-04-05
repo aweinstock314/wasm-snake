@@ -18,7 +18,7 @@ wee_alloc = { version = "0.4", optional = true }
 [dependencies.web-sys]
 version = "0.3"
 optional = true
-features = ["Document", "Element", "MessageEvent", "Node", "WebSocket", "Window", "console"]
+features = ["Document", "Element", "Location", "MessageEvent", "Node", "WebSocket", "Window", "console"]
 
 [features]
 server-deps = ["futures", "futures-util", "tokio", "warp"]

@@ -35,6 +35,7 @@ async fn main() {
         .or(wasm_snake_js)
         .or(wasm_snake_wasm)
         .or(ws_endpoint);
-    println!("Serving on 127.0.0.1:8000");
-    warp::serve(server).run(([127, 0, 0, 1], 8000)).await;
+    let into_ip = ([0, 0, 0, 0], 8000);
+    println!("Serving on {:?}", into_ip);
+    warp::serve(server).run(into_ip).await;
 }

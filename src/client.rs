@@ -22,7 +22,8 @@ pub fn wasm_main() -> Result<(), JsValue> {
         }
     }) as Box<dyn FnMut(MessageEvent)>);
 
-    let ws = web_sys::WebSocket::new("ws://127.0.0.1:8000/client_connection").unwrap();
+    let host = document.location().and_then(|loc| loc.host().ok()).unwrap();
+    let ws = web_sys::WebSocket::new(&format!("ws://{}/client_connection", host)).unwrap();
     ws.set_onmessage(onmessage_closure.as_ref().dyn_ref());
 
     onmessage_closure.forget();
