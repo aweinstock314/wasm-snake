@@ -9,7 +9,8 @@
         import init, { wasm_main } from './pkg/wasm_snake.js';
         async function main() {
             await init('./pkg/wasm_snake_bg.wasm');
-            wasm_main();
+            let raf_closure = wasm_main();
+            window.requestAnimationFrame(function rec(ts) { raf_closure(ts); window.requestAnimationFrame(rec); });
         }
         main()
     </script>

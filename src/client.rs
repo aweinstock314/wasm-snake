@@ -1,5 +1,6 @@
 #![cfg(feature="client-deps")]
 
+use std::collections::HashMap;
 use web_sys::MessageEvent;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 use wasm_bindgen::prelude::*;
@@ -51,6 +52,11 @@ fn render_tile(canvas_ctx: &CanvasRenderingContext2d, x: f64, y: f64, w: f64, h:
             canvas_ctx.fill();
         },
         Food => {
+            render_tile(canvas_ctx, x, y, w, h, Tile::Empty);
+            canvas_ctx.set_fill_style(&JsValue::from_str(&"#808000"));
+            canvas_ctx.begin_path();
+            canvas_ctx.ellipse(x+w/2.0, y+h/2.0, w/4.0, h/4.0, 0.0, 0.0, TAU).unwrap();
+            canvas_ctx.fill();
         },
     }
 }
@@ -67,7 +73,7 @@ fn render_board(canvas: &HtmlCanvasElement, canvas_ctx: &CanvasRenderingContext2
 }
 
 #[wasm_bindgen]
-pub fn wasm_main() -> Result<(), JsValue> {
+pub fn wasm_main() -> Result<JsValue, JsValue> {
     #[global_allocator]
     static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
@@ -95,12 +101,39 @@ pub fn wasm_main() -> Result<(), JsValue> {
     let canvas_ctx: CanvasRenderingContext2d = canvas.get_context("2d").ok().flatten().and_then(|x| x.dyn_into().ok()).unwrap();
     log(&format!("{:?}", canvas_ctx));
 
-    let mut board = Board::new(30, 30);
-    board.place_player(2, 2, PlayerId(0), Direction::Right);
-    board.place_player(3, 2, PlayerId(0), Direction::Down);
-    board.place_player(3, 3, PlayerId(0), Direction::Left);
-    board.place_player(2, 3, PlayerId(0), Direction::Down);
-    render_board(&canvas, &canvas_ctx, &board);
 
-    Ok(())
+    /*fn animation_frame(window: web_sys::Window, gamestate: GameState, canvas: HtmlCanvasElement, canvas_ctx: CanvasRenderingContext2d, timestamp: Option<f64>) {
+        let window_ = window.clone();
+        let raf_closure = Closure::once_into_js(move |ts: f64| {
+            //log(&format!("ts: {:?}", ts));
+            render_board(&canvas, &canvas_ctx, &gamestate.board);
+            animation_frame(window_, gamestate, canvas, canvas_ctx, Some(ts));
+        });
+        window.request_animation_frame(raf_closure.as_ref().unchecked_ref());
+    }*/
+
+    let mut gamestate = GameState::new();
+    gamestate.place_player_near(coord(2, 2), PlayerId(0));
+    gamestate.board[coord(10, 2)] = Tile::Food;
+    let mut last_ts = None;
+    let raf_closure = Closure::wrap(Box::new(move |ts: f64| {
+        if let Some(ts2) = last_ts.as_mut() {
+            let seconds_since_last = (ts - *ts2)/1000.0;
+            let num_ticks = (seconds_since_last*TICKS_PER_SECOND) as usize;
+            if num_ticks > 0 {
+                log(&format!("{:?} {:?}", seconds_since_last, num_ticks));
+                for _ in 0..num_ticks {
+                    gamestate.tick(&HashMap::new());
+                }
+                *ts2 = ts;
+            }
+        } else {
+            last_ts = Some(ts);
+        }
+        render_board(&canvas, &canvas_ctx, &gamestate.board);
+    }) as Box<dyn FnMut(f64)>);
+    let raf_closure_jsval = raf_closure.as_ref().clone();
+    raf_closure.forget();
+
+    Ok(raf_closure_jsval)
 }
