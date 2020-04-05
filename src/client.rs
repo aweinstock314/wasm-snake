@@ -77,10 +77,10 @@ fn keyevent_to_playerinput(e: &KeyboardEvent) -> Option<PlayerInput> {
     use PlayerInput::*;
     use Direction::*;
     match e.key_code() {
-        KeyEvent::DOM_VK_UP => Some(ChangeDirection(Up)),
-        KeyEvent::DOM_VK_DOWN => Some(ChangeDirection(Down)),
-        KeyEvent::DOM_VK_LEFT => Some(ChangeDirection(Left)),
-        KeyEvent::DOM_VK_RIGHT => Some(ChangeDirection(Right)),
+        KeyEvent::DOM_VK_UP | KeyEvent::DOM_VK_W => Some(ChangeDirection(Up)),
+        KeyEvent::DOM_VK_DOWN | KeyEvent::DOM_VK_S => Some(ChangeDirection(Down)),
+        KeyEvent::DOM_VK_LEFT | KeyEvent::DOM_VK_A => Some(ChangeDirection(Left)),
+        KeyEvent::DOM_VK_RIGHT | KeyEvent::DOM_VK_D => Some(ChangeDirection(Right)),
         _ => None,
     }
 }
