@@ -1,6 +1,11 @@
 #![cfg(feature="server-deps")]
 
+use futures::future;
+use futures_util::{FutureExt, StreamExt};
+use futures_util::sink::SinkExt;
+use tokio::sync::mpsc;
 use warp::Filter;
+use warp::ws::{Ws, Message};
 
 #[tokio::main]
 async fn main() {
@@ -16,7 +21,20 @@ async fn main() {
         .map(|| &include_bytes!("../static/pkg/wasm_snake_bg.wasm")[..])
         .with(warp::reply::with::header("Content-type", "application/wasm"));
 
-    let server = index.or(wasm_snake_js).or(wasm_snake_wasm);
+    let ws_endpoint = warp::path("client_connection")
+        .and(warp::ws())
+        .map(|ws: Ws| ws.on_upgrade(|websocket| {
+            let (ws_tx, wx_rx) = websocket.split();
+            let (tx, rx) = mpsc::unbounded_channel();
+            tokio::task::spawn(rx.forward(ws_tx).map(|x| if let Err(e) = x { eprintln!("{:?}", e) }));
+            let _ = tx.send(Ok(Message::text("Hello from a websocket!")));
+            future::lazy(|_| ())
+        }));
+
+    let server = index
+        .or(wasm_snake_js)
+        .or(wasm_snake_wasm)
+        .or(ws_endpoint);
     println!("Serving on 127.0.0.1:8000");
     warp::serve(server).run(([127, 0, 0, 1], 8000)).await;
 }

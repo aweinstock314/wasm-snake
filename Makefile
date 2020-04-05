@@ -1,4 +1,4 @@
-.PHONY: all client server serve_with_python
+.PHONY: all client server serve_with_python serve_with_rust
 
 all: client server
 
