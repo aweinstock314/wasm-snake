@@ -1,8 +1,6 @@
 #![cfg(feature="client-deps")]
 
 use std::collections::HashMap;
-//use std::sync::{Arc, Mutex};
-use std::{rc::Rc, cell::RefCell};
 use std::sync::mpsc;
 use web_sys::{KeyEvent, KeyboardEvent, MessageEvent};
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};

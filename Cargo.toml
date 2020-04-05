@@ -6,6 +6,8 @@ edition = "2018"
 
 [dependencies]
 serde = "1.0"
+rand = "0.7"
+rand_chacha = "0.2"
 
 futures = { version = "0.3", optional = true }
 futures-util = { version = "0.3", optional = true }

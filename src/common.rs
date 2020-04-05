@@ -1,3 +1,4 @@
+use rand::{RngCore, SeedableRng};
 use std::collections::HashMap;
 use std::ops::{Add, Index, IndexMut};
 
@@ -43,6 +44,7 @@ pub struct Board {
 
 #[derive(Debug)]
 pub struct GameState {
+    pub rng: rand_chacha::ChaCha20Rng,
     pub board: Board,
     pub player_segments: HashMap<PlayerId, Vec<Coord>>,
 }
@@ -158,6 +160,7 @@ impl Board {
 impl GameState {
     pub fn new() -> GameState {
         GameState {
+            rng: SeedableRng::seed_from_u64(0xdeadbeefdeadbeef),
             board: Board::new(40, 30),
             player_segments: HashMap::new(),
         }
@@ -174,7 +177,9 @@ impl GameState {
             if let Some(head) = segments.last() {
                 if let Tile::WormSegment { pid: pid2, dir: dir2 } = &mut self.board[*head] {
                     assert_eq!(pid, *pid2);
-                    *dir2 = dir;
+                    if dir.delta_coord() + dir2.delta_coord() != coord(0, 0) {
+                        *dir2 = dir;
+                    }
                 }
             }
         }
@@ -184,6 +189,16 @@ impl GameState {
         if let Some(segments) = self.player_segments.remove(&pid) {
             for segment in segments {
                 self.board[segment] = Tile::Empty;
+            }
+        }
+    }
+
+    pub fn spawn_food(&mut self) {
+        loop {
+            let c = coord(self.rng.next_u32() as usize % self.board.width, self.rng.next_u32() as usize % self.board.height);
+            if let Tile::Empty = self.board[c] {
+                self.board[c] = Tile::Food;
+                break
             }
         }
     }
@@ -212,6 +227,7 @@ impl GameState {
                 GameEvent::PlayerDied(pid) => self.remove_player(*pid),
                 GameEvent::PlayerAteFood(pid, coord) => {
                     // TODO: score?
+                    self.spawn_food();
                 },
             }
         }
