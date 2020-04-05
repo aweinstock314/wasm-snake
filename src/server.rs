@@ -7,18 +7,35 @@ use tokio::sync::mpsc;
 use warp::Filter;
 use warp::ws::{Ws, Message};
 
+pub mod common;
+
+macro_rules! load_asset {
+    ($name:literal) => {{
+        #[cfg(feature="server-statically-pack-assets")] {
+            &include_bytes!(concat!("../", $name))[..]
+        }
+        #[cfg(not(feature="server-statically-pack-assets"))] {
+            use ::std::io::Read;
+            let mut data = vec![];
+            let mut file = ::std::fs::File::open($name).unwrap();
+            file.read_to_end(&mut data).unwrap();
+            data
+        }
+    }}
+}
+
 #[tokio::main]
 async fn main() {
     let index = warp::path::end()
-        .map(|| &include_bytes!("../static/index.html")[..])
+        .map(|| load_asset!("static/index.html"))
         .with(warp::reply::with::header("Content-type", "text/html"));
 
     let wasm_snake_js = warp::path!("pkg" / "wasm_snake.js")
-        .map(|| &include_bytes!("../static/pkg/wasm_snake.js")[..])
+        .map(|| load_asset!("static/pkg/wasm_snake.js"))
         .with(warp::reply::with::header("Content-type", "text/javascript"));
 
     let wasm_snake_wasm = warp::path!("pkg" / "wasm_snake_bg.wasm")
-        .map(|| &include_bytes!("../static/pkg/wasm_snake_bg.wasm")[..])
+        .map(|| load_asset!("static/pkg/wasm_snake_bg.wasm"))
         .with(warp::reply::with::header("Content-type", "application/wasm"));
 
     let ws_endpoint = warp::path("client_connection")

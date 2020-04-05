@@ -6,7 +6,7 @@ client:
 	wasm-pack build --target web --out-dir static/pkg -- --features=client-deps
 
 server: client
-	cargo build --bin server --release --features=server-deps
+	cargo build --bin server --release --features=server-deps,server-statically-pack-assets
 
 serve_with_python: client
 	(cd static && python -m SimpleHTTPServer)

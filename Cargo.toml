@@ -18,9 +18,10 @@ wee_alloc = { version = "0.4", optional = true }
 [dependencies.web-sys]
 version = "0.3"
 optional = true
-features = ["Document", "Element", "Location", "MessageEvent", "Node", "WebSocket", "Window", "console"]
+features = ["CanvasRenderingContext2d", "Document", "Element", "HtmlCanvasElement", "Location", "MessageEvent", "Node", "WebSocket", "Window", "console"]
 
 [features]
+server-statically-pack-assets = []
 server-deps = ["futures", "futures-util", "tokio", "warp"]
 client-deps = ["wasm-bindgen", "wee_alloc/size_classes", "web-sys"]
 
