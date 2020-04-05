@@ -10,3 +10,6 @@ server: client
 
 serve_with_python: client
 	(cd static && python -m SimpleHTTPServer)
+
+serve_with_rust: server
+	./target/release/server

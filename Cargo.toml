@@ -6,7 +6,8 @@ edition = "2018"
 
 [dependencies]
 serde = "1.0"
-tungstenite = { version = "0.10", optional = true }
+tokio = { version = "0.2", features = ["macros"], optional = true }
+warp = { version = "0.2", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 wee_alloc = { version = "0.4", optional = true }
 
@@ -16,7 +17,7 @@ optional = true
 features = ["Document", "Element", "Node", "Window", "console"]
 
 [features]
-server-deps = ["tungstenite"]
+server-deps = ["tokio", "warp"]
 client-deps = ["wasm-bindgen", "wee_alloc/size_classes", "web-sys"]
 
 

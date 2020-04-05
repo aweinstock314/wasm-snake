@@ -2,8 +2,6 @@
 
 use wasm_bindgen::prelude::*;
 
-
-
 #[wasm_bindgen]
 pub fn wasm_main() -> Result<(), JsValue> {
     #[global_allocator]
