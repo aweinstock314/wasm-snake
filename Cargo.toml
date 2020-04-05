@@ -1,0 +1,29 @@
+[package]
+name = "wasm-snake"
+version = "0.1.0"
+authors = ["Avi Weinstock <aweinstock314@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+serde = "1.0"
+tungstenite = { version = "0.10", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+wee_alloc = { version = "0.4", optional = true }
+
+[dependencies.web-sys]
+version = "0.3"
+optional = true
+features = ["Document", "Element", "Node", "Window", "console"]
+
+[features]
+server-deps = ["tungstenite"]
+client-deps = ["wasm-bindgen", "wee_alloc/size_classes", "web-sys"]
+
+
+[[bin]]
+name = "server"
+path = "src/server.rs"
+
+[lib]
+path = "src/client.rs"
+crate-type = ["cdylib", "rlib"]
