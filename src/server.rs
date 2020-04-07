@@ -2,14 +2,18 @@
 
 #[macro_use] extern crate serde_derive;
 
-use futures::future;
-use futures_util::{FutureExt, StreamExt};
+use futures::{future, Future};
+use futures_util::{FutureExt, StreamExt, TryStreamExt};
 use futures_util::sink::SinkExt;
-use tokio::sync::mpsc;
+use std::collections::HashMap;
+use std::sync::atomic::{self, AtomicUsize};
+use tokio::sync::mpsc::{self, UnboundedSender, UnboundedReceiver};
+use tokio::time::{Duration, interval};
 use warp::Filter;
-use warp::ws::{Ws, Message};
+use warp::ws::{Ws, WebSocket, Message};
 
 pub mod common;
+use common::*;
 
 macro_rules! load_asset {
     ($name:literal) => {{
@@ -40,21 +44,102 @@ async fn main() {
         .map(|| load_asset!("static/pkg/wasm_snake_bg.wasm"))
         .with(warp::reply::with::header("Content-type", "application/wasm"));
 
+    let (server_tx, server_rx) = mpsc::unbounded_channel();
+    let server_tx_ = server_tx.clone();
     let ws_endpoint = warp::path("client_connection")
         .and(warp::ws())
-        .map(|ws: Ws| ws.on_upgrade(|websocket| {
-            let (ws_tx, wx_rx) = websocket.split();
-            let (tx, rx) = mpsc::unbounded_channel();
-            tokio::task::spawn(rx.forward(ws_tx).map(|x| if let Err(e) = x { eprintln!("{:?}", e) }));
-            let _ = tx.send(Ok(Message::text("Hello from a websocket!")));
-            future::lazy(|_| ())
-        }));
+        .map(move |ws: Ws| { let tmp = server_tx_.clone(); ws.on_upgrade(move |websocket| handle_client_connection(tmp.clone(), websocket)) });
+
+    tokio::task::spawn({
+        let mut server_state = ServerGameState::new();
+        for _ in 0..2 {
+            server_state.game_state.spawn_food();
+        }
+        server_rx.for_each(move |msg| server_state.handle_msg(msg))
+    });
+
+    tokio::task::spawn(interval(Duration::from_millis(500)).for_each(move |_| { let _ = server_tx.send(ServerInternalMsg::DoTick); future::ready(()) }));
 
     let server = index
         .or(wasm_snake_js)
         .or(wasm_snake_wasm)
         .or(ws_endpoint);
+
     let into_ip = ([0, 0, 0, 0], 8000);
     println!("Serving on {:?}", into_ip);
     warp::serve(server).run(into_ip).await;
+}
+
+#[derive(Debug)]
+enum ServerInternalMsg {
+    PlayerConnected(UnboundedSender<ServerToClient>, UnboundedReceiver<ClientToServer>),
+    DoTick,
+}
+
+struct ServerGameState {
+    next_pid: PlayerId,
+    game_state: GameState,
+    channels: HashMap<PlayerId, (UnboundedSender<ServerToClient>, UnboundedReceiver<ClientToServer>)>,
+    player_inputs: HashMap<PlayerId, PlayerInput>,
+}
+
+impl ServerGameState {
+    fn new() -> ServerGameState {
+        ServerGameState {
+            next_pid: PlayerId(0),
+            game_state: GameState::new(),
+            channels: HashMap::new(),
+            player_inputs: HashMap::new(),
+        }
+    }
+    fn handle_msg(&mut self, msg: ServerInternalMsg) -> impl Future<Output=()> {
+        use ServerInternalMsg::*;
+        match msg {
+            PlayerConnected(tx, rx) => {
+                let pid = self.next_pid;
+                self.next_pid.0 += 1;
+                println!("ServerGameState::handle_msg: PlayerConnected {:?}", pid);
+                self.game_state.spawn_player(pid);
+                let _ = tx.send(ServerToClient::Initialize { pid, world: self.game_state.clone() });
+                self.channels.insert(pid, (tx, rx));
+                future::ready(())
+            }
+            DoTick => {
+                for (pid, (tx, rx)) in self.channels.iter_mut() {
+                    while let Ok(c2s) = rx.try_recv() {
+                        use ClientToServer::*;
+                        match c2s {
+                            InputAtTick { tick, input } => {
+                                // TODO: rollback and replay world or discard input based on how recent it is, and send a sparser response
+                                self.player_inputs.insert(*pid, input);
+                                let _ = tx.send(ServerToClient::Initialize { pid: *pid, world: self.game_state.clone() });
+                            },
+                        }
+                    }
+                }
+                self.game_state.tick(&self.player_inputs);
+                println!("current tick: {}", self.game_state.tick);
+                future::ready(())
+            },
+        }
+    }
+}
+
+async fn handle_client_connection(server_tx: UnboundedSender<ServerInternalMsg>, websocket: WebSocket) {
+    let (ws_tx, ws_rx) = websocket.split();
+    let (s2c_tx, s2c_rx) = mpsc::unbounded_channel();
+    let (c2s_tx, c2s_rx) = mpsc::unbounded_channel();
+    tokio::task::spawn(s2c_rx.filter_map(|x| future::ready(match bincode::serialize(&x).map(Message::binary) {
+        Ok(x) => Some(Ok(x)),
+        Err(e) => { eprintln!("Error serializing {:?} to bincode: {:?}", x, e); None }
+    })).forward(ws_tx));
+    tokio::task::spawn(ws_rx.filter_map(|x| future::ready(x.ok())).filter_map(|x| future::ready(bincode::deserialize(x.as_bytes()).ok()))
+        //.forward(c2s_tx)
+        .for_each(move |x: ClientToServer| {
+            println!("Got c2s: {:?}", x);
+            let _ = c2s_tx.send(x);
+            future::ready(())
+        })
+    );
+    let _ = server_tx.send(ServerInternalMsg::PlayerConnected(s2c_tx, c2s_rx));
 }

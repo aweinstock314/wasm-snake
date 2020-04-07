@@ -5,10 +5,7 @@ use std::ops::{Add, Index, IndexMut};
 pub const TAU: f64 = 2.0 * std::f64::consts::PI;
 pub const TICKS_PER_SECOND: f64 = 2.0;
 
-/* ===== Data structures ===== */
-
-#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct PlayerId(pub usize);
+/* ===== Message types ===== */
 
 #[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum PlayerInput {
@@ -20,6 +17,21 @@ pub enum GameEvent {
     PlayerDied(PlayerId),
     PlayerAteFood(PlayerId, Coord),
 }
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub enum ServerToClient {
+    Initialize { pid: PlayerId, world: GameState },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub enum ClientToServer {
+    InputAtTick { tick: u64, input: PlayerInput },
+}
+
+/* ===== Data structures ===== */
+
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct PlayerId(pub usize);
 
 #[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Coord { x: isize, y: isize }
@@ -35,7 +47,7 @@ pub enum Tile {
     Food,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Board {
     pub width: usize,
     pub height: usize,
@@ -45,13 +57,13 @@ pub struct Board {
 pub mod serializable_chacha;
 use serializable_chacha::SerializableChaCha20;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct GameState {
     pub rng: SerializableChaCha20,
+    pub tick: u64,
     pub board: Board,
     pub player_segments: HashMap<PlayerId, Vec<Coord>>,
 }
-
 
 /* ===== Methods ===== */
 
@@ -68,6 +80,10 @@ impl Direction {
     pub fn delta_coord(self) -> Coord {
         let angle = self.radians();
         signed_coord(angle.cos().round() as _, angle.sin().round() as _)
+    }
+    pub fn from_u32(x: u32) -> Direction {
+        use Direction::*;
+        match x % 4 { 0 => Up, 1 => Down, 2 => Left, _ => Right }
     }
 }
 
@@ -164,15 +180,22 @@ impl GameState {
     pub fn new() -> GameState {
         GameState {
             rng: SeedableRng::seed_from_u64(0xdeadbeefdeadbeef),
+            tick: 0,
             board: Board::new(40, 30),
             player_segments: HashMap::new(),
         }
     }
-    pub fn place_player_near(&mut self, c: Coord, pid: PlayerId) {
-        // TODO: reroll location if the spawn would be in danger, chose direction pseudorandomly
-        let dir = Direction::Right;
-        self.board[c] = Tile::WormSegment { pid, dir };
-        self.player_segments.entry(pid).or_insert_with(|| vec![]).push(c);
+    pub fn spawn_player(&mut self, pid: PlayerId) {
+        let dir = Direction::from_u32(self.rng.next_u32());
+        loop {
+            let c = self.random_coord();
+            // TODO: reroll location if the spawn would be in danger in 2-3 ticks
+            if let Tile::Empty = self.board[c] {
+                self.board[c] = Tile::WormSegment { pid, dir };
+                self.player_segments.entry(pid).or_insert_with(|| vec![]).push(c);
+                break
+            }
+        }
     }
 
     pub fn change_direction(&mut self, pid: PlayerId, dir: Direction) {
@@ -195,10 +218,13 @@ impl GameState {
             }
         }
     }
+    pub fn random_coord(&mut self) -> Coord {
+        coord(self.rng.next_u32() as usize % self.board.width, self.rng.next_u32() as usize % self.board.height)
+    }
 
     pub fn spawn_food(&mut self) {
         loop {
-            let c = coord(self.rng.next_u32() as usize % self.board.width, self.rng.next_u32() as usize % self.board.height);
+            let c = self.random_coord();
             if let Tile::Empty = self.board[c] {
                 self.board[c] = Tile::Food;
                 break
@@ -234,6 +260,7 @@ impl GameState {
                 },
             }
         }
+        self.tick += 1;
         events
     }
 }

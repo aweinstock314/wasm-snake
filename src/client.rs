@@ -2,9 +2,10 @@
 
 #[macro_use] extern crate serde_derive;
 
+use js_sys::{ArrayBuffer, Uint8Array};
 use std::collections::HashMap;
 use std::sync::mpsc;
-use web_sys::{KeyEvent, KeyboardEvent, MessageEvent};
+use web_sys::{Blob, Event, FileReader, KeyEvent, KeyboardEvent, MessageEvent};
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -31,6 +32,20 @@ fn regular_polygon_path(canvas_ctx: &CanvasRenderingContext2d, n: usize, c_x: f6
     canvas_ctx.close_path();
 }
 
+fn pid_to_color(pid: PlayerId) -> &'static str {
+    // TODO: more than 8 unique colors, but still distinguishable
+    match pid.0 % 8 {
+        0 => "#ff0000",
+        1 => "#00ff00",
+        2 => "#ffff00",
+        3 => "#0000ff",
+        4 => "#ff00ff",
+        5 => "#00ffff",
+        6 => "#ffffff",
+        _ => "#000000",
+    }
+}
+
 fn render_tile(canvas_ctx: &CanvasRenderingContext2d, x: f64, y: f64, w: f64, h: f64, tile: Tile) {
     use Tile::*;
     // TODO: cache colors
@@ -45,14 +60,15 @@ fn render_tile(canvas_ctx: &CanvasRenderingContext2d, x: f64, y: f64, w: f64, h:
         },
         WormSegment { pid, dir } => {
             render_tile(canvas_ctx, x, y, w, h, Tile::Empty);
-            // TODO: color based on pid
-            canvas_ctx.set_fill_style(&JsValue::from_str(&"#ff0000"));
+            canvas_ctx.set_fill_style(&JsValue::from_str(pid_to_color(pid)));
             let (r_x, r_y) = match dir {
                 Direction::Left | Direction::Right => (w/2.0, h/4.0),
                 Direction::Up | Direction::Down => (w/4.0, h/2.0),
             };
             regular_polygon_path(canvas_ctx, 3, x+(w/2.0), y+(h/2.0), r_x, r_y, dir.radians());
             canvas_ctx.fill();
+            canvas_ctx.set_stroke_style(&JsValue::from_str(&"#101010"));
+            canvas_ctx.stroke();
         },
         Food => {
             render_tile(canvas_ctx, x, y, w, h, Tile::Empty);
@@ -104,7 +120,32 @@ pub fn wasm_main() -> Result<JsValue, JsValue> {
     let pre = document.get_element_by_id("logging_pre").unwrap();
     pre.set_text_content(Some("Hello, world!"));
 
+    let (s2c_tx, s2c_rx) = mpsc::channel();
+
     let onmessage_closure = Closure::wrap(Box::new(move |msg: MessageEvent| {
+        log(&format!("{:?}", msg.data()));
+        if let Some(blob) = msg.data().dyn_ref::<Blob>() {
+            // Blob.arrayBuffer is too new for the firefox that debian stable ships with
+            /*let onmessage_buffer_closure = Closure::wrap(Box::new(move |buffer: JsValue| {
+                let buffer: ArrayBuffer = buffer.dyn_into().unwrap();
+            }) as Box<dyn FnMut(JsValue)>);
+            blob.array_buffer().then(&onmessage_buffer_closure);*/
+            let filereader = FileReader::new().unwrap();
+            let s2c_tx = s2c_tx.clone();
+            let onmessage_reader_closure = Closure::wrap(Box::new(move |e: Event| {
+                let reader: FileReader = e.target().unwrap().dyn_into().unwrap();
+                let buffer: ArrayBuffer = reader.result().unwrap().dyn_into().unwrap();
+                let bytes = Uint8Array::new(&buffer);
+                let msg = bincode::deserialize::<ServerToClient>(&bytes.to_vec());
+                log(&format!("{:?}", msg));
+                if let Ok(msg) = msg {
+                    let _ = s2c_tx.send(msg);
+                }
+            }) as Box<dyn FnMut(Event)>);
+            filereader.set_onload(onmessage_reader_closure.as_ref().dyn_ref());
+            onmessage_reader_closure.forget();
+            filereader.read_as_array_buffer(blob).unwrap();
+        }
         if let Some(data) = msg.data().as_string() {
             pre.set_text_content(Some(&data));
         }
@@ -122,11 +163,8 @@ pub fn wasm_main() -> Result<JsValue, JsValue> {
     log(&format!("{:?}", canvas_ctx));
 
     // TODO: populate from websocket
-    let our_pid = PlayerId(0);
+    let mut our_pid = PlayerId(0);
     let mut gamestate = GameState::new();
-    gamestate.place_player_near(coord(2, 2), our_pid);
-    gamestate.board[coord(10, 2)] = Tile::Food;
-    gamestate.board[coord(15, 2)] = Tile::Food;
 
     let mut current_inputs: HashMap<PlayerId, PlayerInput> = HashMap::new();
     let mut last_ts = None;
@@ -135,17 +173,23 @@ pub fn wasm_main() -> Result<JsValue, JsValue> {
         if let Some(ts2) = last_ts.as_mut() {
             let seconds_since_last = (ts - *ts2)/1000.0;
             let num_ticks = (seconds_since_last*TICKS_PER_SECOND) as usize;
+            while let Ok(msg) = s2c_rx.try_recv() {
+                use ServerToClient::*;
+                match msg {
+                    Initialize { pid, world } => { our_pid = pid; gamestate = world; },
+                }
+            }
+            while let Ok(input) = input_rx.try_recv() {
+                match input {
+                    PlayerInputDelta::Started(input) => { current_inputs.insert(our_pid, input); },
+                    PlayerInputDelta::Ended(input) => if current_inputs[&our_pid] == input { current_inputs.remove(&our_pid); },
+                }
+            }
+            if let Some(input) = current_inputs.get(&our_pid) {
+                ws.send_with_u8_array(&bincode::serialize(&ClientToServer::InputAtTick { tick: gamestate.tick, input: *input }).unwrap()).unwrap();
+            }
             if num_ticks > 0 {
                 log(&format!("{:?} {:?}", seconds_since_last, num_ticks));
-                while let Ok(input) = input_rx.try_recv() {
-                    match input {
-                        PlayerInputDelta::Started(input) => { current_inputs.insert(our_pid, input); },
-                        PlayerInputDelta::Ended(input) => if current_inputs[&our_pid] == input { current_inputs.remove(&our_pid); },
-                    }
-                }
-                if let Some(PlayerInput::ChangeDirection(dir)) = current_inputs.get(&our_pid) {
-                    log(&format!("delta: {:?} {:?} {:?}", dir, dir.radians(), dir.delta_coord()));
-                }
                 log(&format!("current_inputs: {:?}", current_inputs));
                 for _ in 0..num_ticks {
                     let events = gamestate.tick(&current_inputs);

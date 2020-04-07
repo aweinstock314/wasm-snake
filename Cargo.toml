@@ -5,6 +5,7 @@ authors = ["Avi Weinstock <aweinstock314@gmail.com>"]
 edition = "2018"
 
 [dependencies]
+bincode = "1.2"
 serde = "1.0"
 serde_derive = "1.0"
 rand = "0.7"
@@ -12,21 +13,22 @@ rand_chacha = "0.2"
 
 futures = { version = "0.3", optional = true }
 futures-util = { version = "0.3", optional = true }
-tokio = { version = "0.2", features = ["macros"], optional = true }
+tokio = { version = "0.2", features = ["macros", "time"], optional = true }
 warp = { version = "0.2", optional = true }
 
+js-sys = { version = "0.3", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 wee_alloc = { version = "0.4", optional = true }
 
 [dependencies.web-sys]
 version = "0.3"
 optional = true
-features = ["CanvasRenderingContext2d", "Document", "Element", "EventTarget", "HtmlCanvasElement", "Location", "KeyEvent", "KeyboardEvent", "MessageEvent", "Node", "WebSocket", "Window", "console"]
+features = ["Blob", "CanvasRenderingContext2d", "Document", "Element", "EventTarget", "FileReader", "HtmlCanvasElement", "Location", "KeyEvent", "KeyboardEvent", "MessageEvent", "Node", "WebSocket", "Window", "console"]
 
 [features]
 server-statically-pack-assets = []
 server-deps = ["futures", "futures-util", "tokio", "warp"]
-client-deps = ["wasm-bindgen", "wee_alloc/size_classes", "web-sys"]
+client-deps = ["js-sys", "wasm-bindgen", "wee_alloc/size_classes", "web-sys"]
 
 
 [[bin]]
