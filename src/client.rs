@@ -1,5 +1,7 @@
 #![cfg(feature="client-deps")]
 
+#[macro_use] extern crate serde_derive;
+
 use std::collections::HashMap;
 use std::sync::mpsc;
 use web_sys::{KeyEvent, KeyboardEvent, MessageEvent};

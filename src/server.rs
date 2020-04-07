@@ -1,5 +1,7 @@
 #![cfg(feature="server-deps")]
 
+#[macro_use] extern crate serde_derive;
+
 use futures::future;
 use futures_util::{FutureExt, StreamExt};
 use futures_util::sink::SinkExt;

@@ -7,27 +7,27 @@ pub const TICKS_PER_SECOND: f64 = 2.0;
 
 /* ===== Data structures ===== */
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct PlayerId(pub usize);
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum PlayerInput {
     ChangeDirection(Direction),
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum GameEvent {
     PlayerDied(PlayerId),
     PlayerAteFood(PlayerId, Coord),
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Coord { x: isize, y: isize }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Direction { Up, Down, Left, Right }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Tile {
     Empty,
     Wall,
@@ -35,16 +35,19 @@ pub enum Tile {
     Food,
 }
 
-#[derive(Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Board {
     pub width: usize,
     pub height: usize,
     pub tiles: Vec<Tile>,
 }
 
-#[derive(Debug)]
+pub mod serializable_chacha;
+use serializable_chacha::SerializableChaCha20;
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct GameState {
-    pub rng: rand_chacha::ChaCha20Rng,
+    pub rng: SerializableChaCha20,
     pub board: Board,
     pub player_segments: HashMap<PlayerId, Vec<Coord>>,
 }
