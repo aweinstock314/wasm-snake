@@ -6,7 +6,6 @@ use futures::{future, Future};
 use futures_util::{FutureExt, StreamExt, TryStreamExt};
 use futures_util::sink::SinkExt;
 use std::collections::HashMap;
-use std::sync::atomic::{self, AtomicUsize};
 use tokio::sync::mpsc::{self, UnboundedSender, UnboundedReceiver};
 use tokio::time::{Duration, interval};
 use warp::Filter;
@@ -101,21 +100,28 @@ impl ServerGameState {
                 println!("ServerGameState::handle_msg: PlayerConnected {:?}", pid);
                 self.game_state.spawn_player(pid);
                 let _ = tx.send(ServerToClient::Initialize { pid, world: self.game_state.clone() });
+                for (pid, (tx, _)) in self.channels.iter_mut() {
+                    // TODO: lighter-weight way of notifying of new players
+                    let _ = tx.send(ServerToClient::Initialize { pid: *pid, world: self.game_state.clone() });
+                }
                 self.channels.insert(pid, (tx, rx));
                 future::ready(())
             }
             DoTick => {
-                for (pid, (tx, rx)) in self.channels.iter_mut() {
+                for (pid, (_, rx)) in self.channels.iter_mut() {
                     while let Ok(c2s) = rx.try_recv() {
                         use ClientToServer::*;
                         match c2s {
                             InputAtTick { tick, input } => {
                                 // TODO: rollback and replay world or discard input based on how recent it is, and send a sparser response
                                 self.player_inputs.insert(*pid, input);
-                                let _ = tx.send(ServerToClient::Initialize { pid: *pid, world: self.game_state.clone() });
+                                //let _ = tx.send(ServerToClient::Initialize { pid: *pid, world: self.game_state.clone() });
                             },
                         }
                     }
+                }
+                for (pid, (tx, _)) in self.channels.iter_mut() {
+                    let _ = tx.send(ServerToClient::DoTick { tick: self.game_state.tick, inputs: self.player_inputs.clone() });
                 }
                 self.game_state.tick(&self.player_inputs);
                 println!("current tick: {}", self.game_state.tick);

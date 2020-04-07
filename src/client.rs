@@ -177,6 +177,7 @@ pub fn wasm_main() -> Result<JsValue, JsValue> {
                 use ServerToClient::*;
                 match msg {
                     Initialize { pid, world } => { our_pid = pid; gamestate = world; },
+                    DoTick { tick, inputs } => { gamestate.tick(&inputs); },
                 }
             }
             while let Ok(input) = input_rx.try_recv() {
@@ -191,10 +192,10 @@ pub fn wasm_main() -> Result<JsValue, JsValue> {
             if num_ticks > 0 {
                 log(&format!("{:?} {:?}", seconds_since_last, num_ticks));
                 log(&format!("current_inputs: {:?}", current_inputs));
-                for _ in 0..num_ticks {
+                /*for _ in 0..num_ticks {
                     let events = gamestate.tick(&current_inputs);
                     log(&format!("events: {:?}", events));
-                }
+                }*/
                 *ts2 = ts;
             }
         } else {
