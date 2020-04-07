@@ -14,7 +14,7 @@ pub enum PlayerInput {
 
 #[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum GameEvent {
-    PlayerDied(PlayerId),
+    PlayerDied(PlayerId, u32),
     PlayerAteFood(PlayerId, Coord),
 }
 
@@ -64,6 +64,7 @@ pub struct GameState {
     pub tick: u64,
     pub board: Board,
     pub player_segments: HashMap<PlayerId, Vec<Coord>>,
+    pub num_foods: u64,
 }
 
 /* ===== Methods ===== */
@@ -161,10 +162,10 @@ impl Board {
                     ret.1 = Some(c2);
                 },
                 Wall => {
-                    ret.0.push(GameEvent::PlayerDied(pid));
+                    ret.0.push(GameEvent::PlayerDied(pid, (0.1 * u32::max_value() as f64) as u32));
                 },
                 WormSegment { pid: _, dir: _ } => {
-                    ret.0.push(GameEvent::PlayerDied(pid));
+                    ret.0.push(GameEvent::PlayerDied(pid, (0.9 * u32::max_value() as f64) as u32));
                 },
                 Food => {
                     self[c2] = WormSegment { pid, dir };
@@ -184,6 +185,7 @@ impl GameState {
             tick: 0,
             board: Board::new(40, 30),
             player_segments: HashMap::new(),
+            num_foods: 0,
         }
     }
     pub fn spawn_player(&mut self, pid: PlayerId) {
@@ -212,10 +214,10 @@ impl GameState {
         }
     }
 
-    pub fn remove_player(&mut self, pid: PlayerId) {
+    pub fn remove_player(&mut self, pid: PlayerId, food_probability: u32) {
         if let Some(segments) = self.player_segments.remove(&pid) {
             for segment in segments {
-                self.board[segment] = Tile::Empty;
+                self.board[segment] = if self.rng.next_u32() < food_probability { self.num_foods += 1; Tile::Food } else { Tile::Empty };
             }
         }
     }
@@ -228,6 +230,7 @@ impl GameState {
             let c = self.random_coord();
             if let Tile::Empty = self.board[c] {
                 self.board[c] = Tile::Food;
+                self.num_foods += 1;
                 break
             }
         }
@@ -254,12 +257,16 @@ impl GameState {
         }
         for event in events.iter() {
             match event {
-                GameEvent::PlayerDied(pid) => self.remove_player(*pid),
-                GameEvent::PlayerAteFood(pid, coord) => {
+                GameEvent::PlayerDied(pid, food_probability) => self.remove_player(*pid, *food_probability),
+                GameEvent::PlayerAteFood(_, _) => {
                     // TODO: score?
-                    self.spawn_food();
+                    self.num_foods -= 1;
                 },
             }
+        }
+        let n = self.player_segments.len() as u64 + 2;
+        while self.num_foods < n {
+            self.spawn_food();
         }
         self.tick += 1;
         events

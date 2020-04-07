@@ -51,13 +51,10 @@ async fn main() {
 
     tokio::task::spawn({
         let mut server_state = ServerGameState::new();
-        for _ in 0..2 {
-            server_state.game_state.spawn_food();
-        }
         server_rx.for_each(move |msg| server_state.handle_msg(msg))
     });
 
-    tokio::task::spawn(interval(Duration::from_millis(500)).for_each(move |_| { let _ = server_tx.send(ServerInternalMsg::DoTick); future::ready(()) }));
+    tokio::task::spawn(interval(Duration::from_millis(250)).for_each(move |_| { let _ = server_tx.send(ServerInternalMsg::DoTick); future::ready(()) }));
 
     let server = index
         .or(wasm_snake_js)
