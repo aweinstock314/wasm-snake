@@ -1,5 +1,5 @@
 use rand::{RngCore, SeedableRng};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::ops::{Add, Index, IndexMut};
 
 pub const TAU: f64 = 2.0 * std::f64::consts::PI;
@@ -63,7 +63,7 @@ pub struct GameState {
     pub rng: SerializableChaCha20,
     pub tick: u64,
     pub board: Board,
-    pub player_segments: HashMap<PlayerId, Vec<Coord>>,
+    pub player_segments: HashMap<PlayerId, VecDeque<Coord>>,
     pub num_foods: u64,
 }
 
@@ -195,7 +195,7 @@ impl GameState {
             // TODO: reroll location if the spawn would be in danger in 2-3 ticks
             if let Tile::Empty = self.board[c] {
                 self.board[c] = Tile::WormSegment { pid, dir };
-                self.player_segments.entry(pid).or_insert_with(|| vec![]).push(c);
+                self.player_segments.entry(pid).or_insert_with(|| VecDeque::new()).push_back(c);
                 break
             }
         }
@@ -203,7 +203,7 @@ impl GameState {
 
     pub fn change_direction(&mut self, pid: PlayerId, dir: Direction) {
         if let Some(segments) = self.player_segments.get_mut(&pid) {
-            if let Some(head) = segments.last() {
+            if let Some(head) = segments.back() {
                 if let Tile::WormSegment { pid: pid2, dir: dir2 } = &mut self.board[*head] {
                     assert_eq!(pid, *pid2);
                     if dir.delta_coord() + dir2.delta_coord() != coord(0, 0) {
@@ -244,13 +244,13 @@ impl GameState {
         }
         let mut events = vec![];
         for (pid, segments) in self.player_segments.iter_mut() {
-            if let Some(head) = segments.last() {
+            if let Some(head) = segments.back() {
                 let (new_events, new_segment) = self.board.move_head(*head);
                 if let Some(s) = new_segment {
-                    segments.push(s);
+                    segments.push_back(s);
                 }
                 if segments.len() > 1 && new_events.iter().all(|e| match e { GameEvent::PlayerAteFood(_, _) => false, _ => true }) {
-                    self.board[segments.remove(0)] = Tile::Empty;
+                    self.board[segments.pop_front().unwrap()] = Tile::Empty;
                 }
                 events.extend(new_events);
             }
