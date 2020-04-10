@@ -54,12 +54,30 @@ async fn main() {
         server_rx.for_each(move |msg| server_state.handle_msg(msg))
     });
 
-    tokio::task::spawn(interval(Duration::from_millis(250)).for_each(move |_| { let _ = server_tx.send(ServerInternalMsg::DoTick); future::ready(()) }));
+    let server_tx_ = server_tx.clone();
+    tokio::task::spawn(interval(Duration::from_millis(250)).for_each(move |_| { let _ = server_tx_.send(ServerInternalMsg::DoTick); future::ready(()) }));
+
+    let state_endpoint = warp::path("state")
+        .and_then({
+            async fn tmp(server_tx: UnboundedSender<ServerInternalMsg>) -> Result<String, warp::Rejection> {
+                let (tx, mut rx) = mpsc::unbounded_channel();
+                Ok(match server_tx.send(ServerInternalMsg::GetCurrentState(tx)) {
+                    Ok(()) => match rx.recv().await {
+                        Some(state) => state,
+                        None => format!("recv() failed"),
+                    }
+                    Err(e) => format!("send() failed: {:?}", e),
+                })
+            }
+            move || { let server_tx_ = server_tx.clone(); tmp(server_tx_.clone()) }
+        })
+        .with(warp::reply::with::header("Content-type", "text/plain"));
 
     let server = index
         .or(wasm_snake_js)
         .or(wasm_snake_wasm)
-        .or(ws_endpoint);
+        .or(ws_endpoint)
+        .or(state_endpoint);
 
     let into_ip = ([0, 0, 0, 0], 8000);
     println!("Serving on {:?}", into_ip);
@@ -69,9 +87,11 @@ async fn main() {
 #[derive(Debug)]
 enum ServerInternalMsg {
     PlayerConnected(UnboundedSender<ServerToClient>, UnboundedReceiver<ClientToServer>),
+    GetCurrentState(UnboundedSender<String>),
     DoTick,
 }
 
+#[derive(Debug)]
 struct ServerGameState {
     next_pid: PlayerId,
     game_state: GameState,
@@ -104,6 +124,10 @@ impl ServerGameState {
                 self.channels.insert(pid, (tx, rx));
                 future::ready(())
             }
+            GetCurrentState(tx) => {
+                let _ = tx.send(format!("{:?}", self));
+                future::ready(())
+            }
             DoTick => {
                 for (pid, (_, rx)) in self.channels.iter_mut() {
                     while let Ok(c2s) = rx.try_recv() {
@@ -121,7 +145,7 @@ impl ServerGameState {
                     let _ = tx.send(ServerToClient::DoTick { tick: self.game_state.tick, inputs: self.player_inputs.clone() });
                 }
                 self.game_state.tick(&self.player_inputs);
-                println!("current tick: {}", self.game_state.tick);
+                //println!("current tick: {}", self.game_state.tick);
                 future::ready(())
             },
         }
@@ -139,7 +163,7 @@ async fn handle_client_connection(server_tx: UnboundedSender<ServerInternalMsg>,
     tokio::task::spawn(ws_rx.filter_map(|x| future::ready(x.ok())).filter_map(|x| future::ready(bincode::deserialize(x.as_bytes()).ok()))
         //.forward(c2s_tx)
         .for_each(move |x: ClientToServer| {
-            println!("Got c2s: {:?}", x);
+            //println!("Got c2s: {:?}", x);
             let _ = c2s_tx.send(x);
             future::ready(())
         })
