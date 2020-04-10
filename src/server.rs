@@ -110,45 +110,60 @@ impl ServerGameState {
     }
     fn handle_msg(&mut self, msg: ServerInternalMsg) -> impl Future<Output=()> {
         use ServerInternalMsg::*;
+        let mut to_remove = vec![];
+        let mut send_with_cleanup = |pid, tx: &UnboundedSender<ServerToClient>, msg| {
+            if let Err(_) = tx.send(msg) {
+                to_remove.push(pid);
+            }
+        };
         match msg {
             PlayerConnected(tx, rx) => {
                 let pid = self.next_pid;
                 self.next_pid.0 += 1;
                 println!("ServerGameState::handle_msg: PlayerConnected {:?}", pid);
                 self.game_state.spawn_player(pid);
-                let _ = tx.send(ServerToClient::Initialize { pid, world: self.game_state.clone() });
+                send_with_cleanup(pid, &tx, ServerToClient::Initialize { pid, world: self.game_state.clone() });
                 for (pid, (tx, _)) in self.channels.iter_mut() {
                     // TODO: lighter-weight way of notifying of new players
-                    let _ = tx.send(ServerToClient::Initialize { pid: *pid, world: self.game_state.clone() });
+                    send_with_cleanup(*pid, &tx, ServerToClient::Initialize { pid: *pid, world: self.game_state.clone() });
                 }
                 self.channels.insert(pid, (tx, rx));
-                future::ready(())
             }
             GetCurrentState(tx) => {
                 let _ = tx.send(format!("{:?}", self));
-                future::ready(())
             }
             DoTick => {
-                for (pid, (_, rx)) in self.channels.iter_mut() {
-                    while let Ok(c2s) = rx.try_recv() {
-                        use ClientToServer::*;
-                        match c2s {
-                            InputAtTick { tick, input } => {
-                                // TODO: rollback and replay world or discard input based on how recent it is, and send a sparser response
-                                self.player_inputs.insert(*pid, input);
-                                //let _ = tx.send(ServerToClient::Initialize { pid: *pid, world: self.game_state.clone() });
-                            },
+                if self.channels.len() > 0 {
+                    for (pid, (_, rx)) in self.channels.iter_mut() {
+                        while let Ok(c2s) = rx.try_recv() {
+                            use ClientToServer::*;
+                            match c2s {
+                                InputAtTick { tick, input } => {
+                                    // TODO: rollback and replay world or discard input based on how recent it is, and send a sparser response
+                                    self.player_inputs.insert(*pid, input);
+                                    //let _ = tx.send(ServerToClient::Initialize { pid: *pid, world: self.game_state.clone() });
+                                },
+                            }
                         }
                     }
+                    for (pid, (tx, _)) in self.channels.iter_mut() {
+                        send_with_cleanup(*pid, &tx, ServerToClient::DoTick { tick: self.game_state.tick, inputs: self.player_inputs.clone() });
+                    }
+                    self.game_state.tick(&self.player_inputs);
+                    //println!("current tick: {}", self.game_state.tick);
                 }
-                for (pid, (tx, _)) in self.channels.iter_mut() {
-                    let _ = tx.send(ServerToClient::DoTick { tick: self.game_state.tick, inputs: self.player_inputs.clone() });
-                }
-                self.game_state.tick(&self.player_inputs);
-                //println!("current tick: {}", self.game_state.tick);
-                future::ready(())
             },
         }
+        for pid in to_remove {
+            self.game_state.remove_player(pid, 0);
+            self.player_inputs.remove(&pid);
+            self.channels.remove(&pid);
+            for (_, (tx, _)) in self.channels.iter_mut() {
+                // if this send fails, so well the next DoTick, so they'll eventually get pruned
+                let _ = tx.send(ServerToClient::PlayerDisconnected { pid });
+            }
+        }
+        future::ready(())
     }
 }
 

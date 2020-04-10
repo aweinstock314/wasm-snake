@@ -22,6 +22,7 @@ pub enum GameEvent {
 pub enum ServerToClient {
     Initialize { pid: PlayerId, world: GameState },
     DoTick { tick: u64, inputs: HashMap<PlayerId, PlayerInput> },
+    PlayerDisconnected { pid: PlayerId }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

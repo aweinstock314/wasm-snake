@@ -178,6 +178,7 @@ pub fn wasm_main() -> Result<JsValue, JsValue> {
                 match msg {
                     Initialize { pid, world } => { our_pid = pid; gamestate = world; },
                     DoTick { tick, inputs } => { gamestate.tick(&inputs); },
+                    PlayerDisconnected { pid } => { gamestate.remove_player(pid, 0); },
                 }
             }
             while let Ok(input) = input_rx.try_recv() {
