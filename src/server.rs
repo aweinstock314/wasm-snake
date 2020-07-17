@@ -59,7 +59,7 @@ async fn main() {
 
     let state_endpoint = warp::path("state")
         .and_then({
-            async fn tmp(server_tx: UnboundedSender<ServerInternalMsg>) -> Result<String, warp::Rejection> {
+            async fn tmp(server_tx: UnboundedSender<ServerInternalMsg<SnakeGameState>>) -> Result<String, warp::Rejection> {
                 let (tx, mut rx) = mpsc::unbounded_channel();
                 Ok(match server_tx.send(ServerInternalMsg::GetCurrentState(tx)) {
                     Ok(()) => match rx.recv().await {
@@ -85,30 +85,30 @@ async fn main() {
 }
 
 #[derive(Debug)]
-enum ServerInternalMsg {
-    PlayerConnected(UnboundedSender<ServerToClient>, UnboundedReceiver<ClientToServer>),
+enum ServerInternalMsg<G: GameState> {
+    PlayerConnected(UnboundedSender<G::S2CMsg>, UnboundedReceiver<G::C2SMsg>),
     GetCurrentState(UnboundedSender<String>),
     DoTick,
 }
 
 #[derive(Debug)]
-struct ServerGameState {
+struct ServerGameState<G: GameState> {
     next_pid: PlayerId,
-    game_state: GameState,
-    channels: HashMap<PlayerId, (UnboundedSender<ServerToClient>, UnboundedReceiver<ClientToServer>)>,
-    player_inputs: HashMap<PlayerId, PlayerInput>,
+    game_state: G,
+    channels: HashMap<PlayerId, (UnboundedSender<G::S2CMsg>, UnboundedReceiver<G::C2SMsg>)>,
+    player_inputs: HashMap<PlayerId, G::PlayerInput>,
 }
 
-impl ServerGameState {
-    fn new() -> ServerGameState {
+impl ServerGameState<SnakeGameState> {
+    fn new() -> ServerGameState<SnakeGameState> {
         ServerGameState {
             next_pid: PlayerId(0),
-            game_state: GameState::new(),
+            game_state: SnakeGameState::new(),
             channels: HashMap::new(),
             player_inputs: HashMap::new(),
         }
     }
-    fn handle_msg(&mut self, msg: ServerInternalMsg) -> impl Future<Output=()> {
+    fn handle_msg(&mut self, msg: ServerInternalMsg<SnakeGameState>) -> impl Future<Output=()> {
         use ServerInternalMsg::*;
         let mut to_remove = vec![];
         let mut send_with_cleanup = |pid, tx: &UnboundedSender<ServerToClient>, msg| {
@@ -167,7 +167,7 @@ impl ServerGameState {
     }
 }
 
-async fn handle_client_connection(server_tx: UnboundedSender<ServerInternalMsg>, websocket: WebSocket) {
+async fn handle_client_connection<G: GameState>(server_tx: UnboundedSender<ServerInternalMsg<G>>, websocket: WebSocket) where G::S2CMsg: 'static+Send, G::C2SMsg: 'static+Send {
     let (ws_tx, ws_rx) = websocket.split();
     let (s2c_tx, s2c_rx) = mpsc::unbounded_channel();
     let (c2s_tx, c2s_rx) = mpsc::unbounded_channel();
@@ -177,7 +177,7 @@ async fn handle_client_connection(server_tx: UnboundedSender<ServerInternalMsg>,
     })).forward(ws_tx));
     tokio::task::spawn(ws_rx.filter_map(|x| future::ready(x.ok())).filter_map(|x| future::ready(bincode::deserialize(x.as_bytes()).ok()))
         //.forward(c2s_tx)
-        .for_each(move |x: ClientToServer| {
+        .for_each(move |x: G::C2SMsg| {
             //println!("Got c2s: {:?}", x);
             let _ = c2s_tx.send(x);
             future::ready(())

@@ -91,8 +91,8 @@ fn render_board(canvas: &HtmlCanvasElement, canvas_ctx: &CanvasRenderingContext2
     }
 }
 
-fn keyevent_to_playerinput(e: &KeyboardEvent) -> Option<PlayerInput> {
-    use PlayerInput::*;
+fn keyevent_to_playerinput(e: &KeyboardEvent) -> Option<SnakePlayerInput> {
+    use SnakePlayerInput::*;
     use Direction::*;
     match e.key_code() {
         KeyEvent::DOM_VK_UP | KeyEvent::DOM_VK_W => Some(ChangeDirection(Up)),
@@ -104,8 +104,8 @@ fn keyevent_to_playerinput(e: &KeyboardEvent) -> Option<PlayerInput> {
 }
 
 enum PlayerInputDelta {
-    Started(PlayerInput),
-    Ended(PlayerInput),
+    Started(SnakePlayerInput),
+    Ended(SnakePlayerInput),
 }
 
 #[wasm_bindgen]
@@ -162,11 +162,12 @@ pub fn wasm_main() -> Result<JsValue, JsValue> {
     let canvas_ctx: CanvasRenderingContext2d = canvas.get_context("2d").ok().flatten().and_then(|x| x.dyn_into().ok()).unwrap();
     log(&format!("{:?}", canvas_ctx));
 
+
     // TODO: populate from websocket
     let mut our_pid = PlayerId(0);
-    let mut gamestate = GameState::new();
+    let mut gamestate = SnakeGameState::new();
 
-    let mut current_inputs: HashMap<PlayerId, PlayerInput> = HashMap::new();
+    let mut current_inputs: HashMap<PlayerId, <SnakeGameState as GameState>::PlayerInput> = HashMap::new();
     let mut last_ts = None;
     let (input_tx, input_rx) = mpsc::channel();
     let raf_closure = Closure::wrap(Box::new(move |ts: f64| {

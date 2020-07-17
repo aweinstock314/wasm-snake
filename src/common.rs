@@ -1,33 +1,45 @@
 use rand::{RngCore, SeedableRng};
 use std::collections::{HashMap, VecDeque};
+use std::{fmt::Debug, hash::Hash};
 use std::ops::{Add, Index, IndexMut};
+use serde::{Serialize, Deserialize};
 
 pub const TAU: f64 = 2.0 * std::f64::consts::PI;
 pub const TICKS_PER_SECOND: f64 = 2.0;
 
+pub trait GameState {
+    type PlayerInput: Serialize+for<'de>Deserialize<'de>+Copy+Clone+Debug+PartialEq+Eq+Hash;
+    type GameEvent: Serialize+for<'de>Deserialize<'de>+Copy+Clone+Debug+PartialEq+Eq+Hash;
+    type S2CMsg: Serialize+for<'de>Deserialize<'de>+Clone+Debug;
+    type C2SMsg: Serialize+for<'de>Deserialize<'de>+Clone+Debug;
+
+    fn new() -> Self;
+    fn tick(&mut self, inputs: &HashMap<PlayerId, Self::PlayerInput>) -> Vec<Self::GameEvent>;
+}
+
 /* ===== Message types ===== */
 
 #[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub enum PlayerInput {
+pub enum SnakePlayerInput {
     ChangeDirection(Direction),
 }
 
 #[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub enum GameEvent {
+pub enum SnakeGameEvent {
     PlayerDied(PlayerId, u32),
     PlayerAteFood(PlayerId, Coord),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum ServerToClient {
-    Initialize { pid: PlayerId, world: GameState },
-    DoTick { tick: u64, inputs: HashMap<PlayerId, PlayerInput> },
+    Initialize { pid: PlayerId, world: SnakeGameState },
+    DoTick { tick: u64, inputs: HashMap<PlayerId, SnakePlayerInput> },
     PlayerDisconnected { pid: PlayerId }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum ClientToServer {
-    InputAtTick { tick: u64, input: PlayerInput },
+    InputAtTick { tick: u64, input: SnakePlayerInput },
 }
 
 /* ===== Data structures ===== */
@@ -60,7 +72,7 @@ pub mod serializable_chacha;
 use serializable_chacha::SerializableChaCha20;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct GameState {
+pub struct SnakeGameState {
     pub rng: SerializableChaCha20,
     pub tick: u64,
     pub board: Board,
@@ -152,7 +164,7 @@ impl Board {
         ret
     }
 
-    pub fn move_head(&mut self, c: Coord) -> (Vec<GameEvent>, Option<Coord>) {
+    pub fn move_head(&mut self, c: Coord) -> (Vec<SnakeGameEvent>, Option<Coord>) {
         use Tile::*;
         let mut ret = (vec![], None);
         if let WormSegment { pid, dir } = self[c] {
@@ -163,14 +175,14 @@ impl Board {
                     ret.1 = Some(c2);
                 },
                 Wall => {
-                    ret.0.push(GameEvent::PlayerDied(pid, (0.1 * u32::max_value() as f64) as u32));
+                    ret.0.push(SnakeGameEvent::PlayerDied(pid, (0.1 * u32::max_value() as f64) as u32));
                 },
                 WormSegment { pid: _, dir: _ } => {
-                    ret.0.push(GameEvent::PlayerDied(pid, (0.9 * u32::max_value() as f64) as u32));
+                    ret.0.push(SnakeGameEvent::PlayerDied(pid, (0.9 * u32::max_value() as f64) as u32));
                 },
                 Food => {
                     self[c2] = WormSegment { pid, dir };
-                    ret.0.push(GameEvent::PlayerAteFood(pid, c2));
+                    ret.0.push(SnakeGameEvent::PlayerAteFood(pid, c2));
                     ret.1 = Some(c2);
                 },
             }
@@ -179,9 +191,14 @@ impl Board {
     }
 }
 
-impl GameState {
-    pub fn new() -> GameState {
-        GameState {
+impl GameState for SnakeGameState {
+    type PlayerInput = SnakePlayerInput;
+    type GameEvent = SnakeGameEvent;
+    type S2CMsg = ServerToClient;
+    type C2SMsg = ClientToServer;
+
+    fn new() -> SnakeGameState {
+        SnakeGameState {
             rng: SeedableRng::seed_from_u64(0xdeadbeefdeadbeef),
             tick: 0,
             board: Board::new(40, 30),
@@ -189,6 +206,45 @@ impl GameState {
             num_foods: 0,
         }
     }
+
+    fn tick(&mut self, inputs: &HashMap<PlayerId, Self::PlayerInput>) -> Vec<Self::GameEvent> {
+        for (pid, input) in inputs.iter() {
+            match input {
+                SnakePlayerInput::ChangeDirection(dir) => self.change_direction(*pid, *dir),
+            }
+        }
+        let mut events = vec![];
+        for (pid, segments) in self.player_segments.iter_mut() {
+            if let Some(head) = segments.back() {
+                let (new_events, new_segment) = self.board.move_head(*head);
+                if let Some(s) = new_segment {
+                    segments.push_back(s);
+                }
+                if segments.len() > 1 && new_events.iter().all(|e| match e { SnakeGameEvent::PlayerAteFood(_, _) => false, _ => true }) {
+                    self.board[segments.pop_front().unwrap()] = Tile::Empty;
+                }
+                events.extend(new_events);
+            }
+        }
+        for event in events.iter() {
+            match event {
+                SnakeGameEvent::PlayerDied(pid, food_probability) => self.remove_player(*pid, *food_probability),
+                SnakeGameEvent::PlayerAteFood(_, _) => {
+                    // TODO: score?
+                    self.num_foods -= 1;
+                },
+            }
+        }
+        let n = self.player_segments.len() as u64 + 2;
+        while self.num_foods < n {
+            self.spawn_food();
+        }
+        self.tick += 1;
+        events
+    }
+}
+
+impl SnakeGameState {
     pub fn spawn_player(&mut self, pid: PlayerId) {
         let dir = Direction::from_u32(self.rng.next_u32());
         loop {
@@ -235,41 +291,5 @@ impl GameState {
                 break
             }
         }
-    }
-
-    pub fn tick(&mut self, inputs: &HashMap<PlayerId, PlayerInput>) -> Vec<GameEvent> {
-        for (pid, input) in inputs.iter() {
-            match input {
-                PlayerInput::ChangeDirection(dir) => self.change_direction(*pid, *dir),
-            }
-        }
-        let mut events = vec![];
-        for (pid, segments) in self.player_segments.iter_mut() {
-            if let Some(head) = segments.back() {
-                let (new_events, new_segment) = self.board.move_head(*head);
-                if let Some(s) = new_segment {
-                    segments.push_back(s);
-                }
-                if segments.len() > 1 && new_events.iter().all(|e| match e { GameEvent::PlayerAteFood(_, _) => false, _ => true }) {
-                    self.board[segments.pop_front().unwrap()] = Tile::Empty;
-                }
-                events.extend(new_events);
-            }
-        }
-        for event in events.iter() {
-            match event {
-                GameEvent::PlayerDied(pid, food_probability) => self.remove_player(*pid, *food_probability),
-                GameEvent::PlayerAteFood(_, _) => {
-                    // TODO: score?
-                    self.num_foods -= 1;
-                },
-            }
-        }
-        let n = self.player_segments.len() as u64 + 2;
-        while self.num_foods < n {
-            self.spawn_food();
-        }
-        self.tick += 1;
-        events
     }
 }
