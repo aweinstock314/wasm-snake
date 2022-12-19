@@ -3,7 +3,7 @@
 #[macro_use] extern crate serde_derive;
 
 use js_sys::{ArrayBuffer, Uint8Array};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::mpsc;
 use web_sys::{Blob, Event, FileReader, KeyEvent, KeyboardEvent, MessageEvent};
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
@@ -167,7 +167,7 @@ pub fn wasm_main() -> Result<JsValue, JsValue> {
     let mut our_pid = PlayerId(0);
     let mut gamestate = SnakeGameState::new();
 
-    let mut current_inputs: HashMap<PlayerId, <SnakeGameState as GameState>::PlayerInput> = HashMap::new();
+    let mut current_inputs: BTreeMap<PlayerId, <SnakeGameState as GameState>::PlayerInput> = BTreeMap::new();
     let mut last_ts = None;
     let (input_tx, input_rx) = mpsc::channel();
     let raf_closure = Closure::wrap(Box::new(move |ts: f64| {

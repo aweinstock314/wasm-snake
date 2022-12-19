@@ -1,6 +1,6 @@
 use rand::{RngCore, SeedableRng};
-use std::collections::{HashMap, VecDeque};
-use std::{fmt::Debug, hash::Hash};
+use std::collections::{BTreeMap, VecDeque};
+use std::{cmp::{PartialOrd, Ord}, fmt::Debug};
 use std::ops::{Add, Index, IndexMut};
 use serde::{Serialize, Deserialize};
 
@@ -8,23 +8,23 @@ pub const TAU: f64 = 2.0 * std::f64::consts::PI;
 pub const TICKS_PER_SECOND: f64 = 2.0;
 
 pub trait GameState {
-    type PlayerInput: Serialize+for<'de>Deserialize<'de>+Copy+Clone+Debug+PartialEq+Eq+Hash;
-    type GameEvent: Serialize+for<'de>Deserialize<'de>+Copy+Clone+Debug+PartialEq+Eq+Hash;
+    type PlayerInput: Serialize+for<'de>Deserialize<'de>+Copy+Clone+Debug+PartialEq+Eq+PartialOrd+Ord;
+    type GameEvent: Serialize+for<'de>Deserialize<'de>+Copy+Clone+Debug+PartialEq+Eq+PartialOrd+Ord;
     type S2CMsg: Serialize+for<'de>Deserialize<'de>+Clone+Debug;
     type C2SMsg: Serialize+for<'de>Deserialize<'de>+Clone+Debug;
 
     fn new() -> Self;
-    fn tick(&mut self, inputs: &HashMap<PlayerId, Self::PlayerInput>) -> Vec<Self::GameEvent>;
+    fn tick(&mut self, inputs: &BTreeMap<PlayerId, Self::PlayerInput>) -> Vec<Self::GameEvent>;
 }
 
 /* ===== Message types ===== */
 
-#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SnakePlayerInput {
     ChangeDirection(Direction),
 }
 
-#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SnakeGameEvent {
     PlayerDied(PlayerId, u32),
     PlayerAteFood(PlayerId, Coord),
@@ -33,7 +33,7 @@ pub enum SnakeGameEvent {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum ServerToClient {
     Initialize { pid: PlayerId, world: SnakeGameState },
-    DoTick { tick: u64, inputs: HashMap<PlayerId, SnakePlayerInput> },
+    DoTick { tick: u64, inputs: BTreeMap<PlayerId, SnakePlayerInput> },
     PlayerDisconnected { pid: PlayerId }
 }
 
@@ -44,16 +44,16 @@ pub enum ClientToServer {
 
 /* ===== Data structures ===== */
 
-#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PlayerId(pub usize);
 
-#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Coord { x: isize, y: isize }
 
-#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Direction { Up, Down, Left, Right }
 
-#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Tile {
     Empty,
     Wall,
@@ -76,7 +76,7 @@ pub struct SnakeGameState {
     pub rng: SerializableChaCha20,
     pub tick: u64,
     pub board: Board,
-    pub player_segments: HashMap<PlayerId, VecDeque<Coord>>,
+    pub player_segments: BTreeMap<PlayerId, VecDeque<Coord>>,
     pub num_foods: u64,
 }
 
@@ -202,12 +202,12 @@ impl GameState for SnakeGameState {
             rng: SeedableRng::seed_from_u64(0xdeadbeefdeadbeef),
             tick: 0,
             board: Board::new(40, 30),
-            player_segments: HashMap::new(),
+            player_segments: BTreeMap::new(),
             num_foods: 0,
         }
     }
 
-    fn tick(&mut self, inputs: &HashMap<PlayerId, Self::PlayerInput>) -> Vec<Self::GameEvent> {
+    fn tick(&mut self, inputs: &BTreeMap<PlayerId, Self::PlayerInput>) -> Vec<Self::GameEvent> {
         for (pid, input) in inputs.iter() {
             match input {
                 SnakePlayerInput::ChangeDirection(dir) => self.change_direction(*pid, *dir),

@@ -5,7 +5,7 @@
 use futures::{future, Future};
 use futures_util::{FutureExt, StreamExt, TryStreamExt};
 use futures_util::sink::SinkExt;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use tokio::sync::mpsc::{self, UnboundedSender, UnboundedReceiver};
 use tokio::time::{Duration, interval};
 use warp::Filter;
@@ -95,8 +95,8 @@ enum ServerInternalMsg<G: GameState> {
 struct ServerGameState<G: GameState> {
     next_pid: PlayerId,
     game_state: G,
-    channels: HashMap<PlayerId, (UnboundedSender<G::S2CMsg>, UnboundedReceiver<G::C2SMsg>)>,
-    player_inputs: HashMap<PlayerId, G::PlayerInput>,
+    channels: BTreeMap<PlayerId, (UnboundedSender<G::S2CMsg>, UnboundedReceiver<G::C2SMsg>)>,
+    player_inputs: BTreeMap<PlayerId, G::PlayerInput>,
 }
 
 impl ServerGameState<SnakeGameState> {
@@ -104,8 +104,8 @@ impl ServerGameState<SnakeGameState> {
         ServerGameState {
             next_pid: PlayerId(0),
             game_state: SnakeGameState::new(),
-            channels: HashMap::new(),
-            player_inputs: HashMap::new(),
+            channels: BTreeMap::new(),
+            player_inputs: BTreeMap::new(),
         }
     }
     fn handle_msg(&mut self, msg: ServerInternalMsg<SnakeGameState>) -> impl Future<Output=()> {
