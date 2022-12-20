@@ -33,9 +33,8 @@ fn regular_polygon_path<F: Fn(f64, f64) -> (f64, f64)>(canvas_ctx: &CanvasRender
     canvas_ctx.close_path();
 }
 
-fn snake_segment_path(canvas_ctx: &CanvasRenderingContext2d, x: f64, y: f64, w: f64, h: f64, prev_dir: Option<Direction>, current_dir: Direction, next_dir: Option<Direction>) {
-    canvas_ctx.begin_path();
-    let head_radius = |theta0: f64, theta: f64| if theta0.cos()*theta.cos() + theta0.sin()*theta.sin() > 0.0 { (w / 2.0,  h / 2.0) } else { (w/3.0, h/3.0) };
+fn snake_segment_path(canvas_ctx: &CanvasRenderingContext2d, x: f64, y: f64, w: f64, h: f64, prev_dir: Option<Direction>, current_dir: Direction, next_dir: Option<Direction>, forward_stroke: bool) {
+    //let head_radius = |theta0: f64, theta: f64| if theta0.cos()*theta.cos() + theta0.sin()*theta.sin() > 0.0 { (w / 2.0,  h / 2.0) } else { (w/3.0, h/3.0) };
     let r = Vec2::new(w/2.0, h/2.0);
     let r2 = Vec2::new(w/3.0, h/3.0);
     let c = Vec2::new(x, y) + r;
@@ -49,43 +48,54 @@ fn snake_segment_path(canvas_ctx: &CanvasRenderingContext2d, x: f64, y: f64, w: 
             let center_phi = Vec2::new(-center_theta.y, center_theta.x);
             let mid_prev = c - r * Vec2::from_angle(prev_theta);
             let mid_next = c + r * Vec2::from_angle(next_theta);
-            let p0a = mid_prev - r2 * Vec2::from_angle(prev_phi);
+            //let p0a = mid_prev - r2 * Vec2::from_angle(prev_phi);
             let p0b = mid_prev + r2 * Vec2::from_angle(prev_phi);
-            let ca = c - r2 * center_phi;
-            let cb = c + r2 * center_phi;
+            let r_tweak = if prev_theta.cos()*next_theta.cos() + prev_theta.sin() * next_theta.sin() < 0.5 { 3f64.sqrt() } else { 1.0 };
+            let ca = c - r_tweak * r2 * center_phi;
+            let cb = c + r_tweak * r2 * center_phi;
             let p2a = mid_next - r2 * Vec2::from_angle(next_phi);
-            let p2b = mid_next + r2 * Vec2::from_angle(next_phi);
-            canvas_ctx.move_to(p0a.x, p0a.y);
-            canvas_ctx.quadratic_curve_to(ca.x, ca.y, p2a.x, p2a.y);
-            canvas_ctx.line_to(p2b.x, p2b.y);
-            canvas_ctx.quadratic_curve_to(cb.x, cb.y, p0b.x, p0b.y);
-            canvas_ctx.line_to(p0a.x, p0a.y);
+            //let p2b = mid_next + r2 * Vec2::from_angle(next_phi);
+            if forward_stroke {
+                //canvas_ctx.move_to(p0a.x, p0a.y);
+                canvas_ctx.quadratic_curve_to(ca.x, ca.y, p2a.x, p2a.y);
+            } else {
+                //canvas_ctx.line_to(p2b.x, p2b.y);
+                canvas_ctx.quadratic_curve_to(cb.x, cb.y, p0b.x, p0b.y);
+                //canvas_ctx.line_to(p0a.x, p0a.y);
+            }
         },
         (_, None) => {
-            let p0 = c + r * theta;
-            let mouth_a = p0 - r2 * phi;
-            let mouth_b = p0 + r2 * phi;
-            let side_a = c - 1.1 * r * phi;
-            let side_b = c + 1.1 * r * phi;
-            let p1 = c - r * theta - r2 * phi;
-            let p2 = c - r * theta + r2 * phi;
-            let p3 = c;
-            canvas_ctx.move_to(p1.x, p1.y);
-            canvas_ctx.quadratic_curve_to(side_a.x, side_a.y, mouth_a.x, mouth_a.y);
-            canvas_ctx.line_to(p3.x, p3.y);
-            canvas_ctx.line_to(mouth_b.x, mouth_b.y);
-            canvas_ctx.quadratic_curve_to(side_b.x, side_b.y, p2.x, p2.y);
+            if forward_stroke {
+                let p0 = c + r * theta;
+                let mouth_a = p0 - r2 * phi;
+                let mouth_b = p0 + r2 * phi;
+                let side_a = c - 1.1 * r * phi;
+                let side_b = c + 1.1 * r * phi;
+                let p1 = c - r * theta - r2 * phi;
+                let p2 = c - r * theta + r2 * phi;
+                let p3 = c;
+                if prev_dir.is_none() {
+                    canvas_ctx.move_to(p1.x, p1.y);
+                }
+                canvas_ctx.quadratic_curve_to(side_a.x, side_a.y, mouth_a.x, mouth_a.y);
+                canvas_ctx.line_to(p3.x, p3.y);
+                canvas_ctx.line_to(mouth_b.x, mouth_b.y);
+                canvas_ctx.quadratic_curve_to(side_b.x, side_b.y, p2.x, p2.y);
+            }
         },
         (None, Some(_)) => {
             let p0 = c + r * theta;
             let p1 = p0 - r2 * phi;
-            let p2 = p0 + r2 * phi;
+            //let p2 = p0 + r2 * phi;
             let p3 = c - r * theta;
-            canvas_ctx.move_to(p1.x, p1.y);
-            canvas_ctx.quadratic_curve_to(p3.x, p3.y, p2.x, p2.y);
+            if forward_stroke {
+                canvas_ctx.move_to(p1.x, p1.y);
+            } else {
+                //canvas_ctx.move_to(p2.x, p2.y);
+                canvas_ctx.quadratic_curve_to(p3.x, p3.y, p1.x, p1.y);
+            }
         },
     }
-    canvas_ctx.close_path();
 }
 
 fn pid_to_color(pid: PlayerId) -> &'static str {
@@ -140,17 +150,25 @@ fn render_board(canvas: &HtmlCanvasElement, canvas_ctx: &CanvasRenderingContext2
     }
     let extract_dir = |coord: &Coord| if let Tile::WormSegment { dir, .. } = board[*coord] { Some(dir) } else { None };
     for (pid, segments) in player_segments.iter() {
+        canvas_ctx.begin_path();
+        let mut points = Vec::new();
         for i in 0..segments.len() {
             let prev_dir = segments.get(i-1).and_then(extract_dir);
             let dir = extract_dir(&segments[i]).unwrap();
             let next_dir = if i < segments.len() - 1 { Some(dir) } else { None };
             let point = segments[i].to_vec2() * Vec2::new(xscale, yscale);
-            canvas_ctx.set_fill_style(&JsValue::from_str(pid_to_color(*pid)));
-            snake_segment_path(canvas_ctx, point.x, point.y, xscale, yscale, prev_dir, dir, next_dir);
-            canvas_ctx.fill();
-            canvas_ctx.set_stroke_style(&JsValue::from_str(&"#101010"));
-            canvas_ctx.stroke();
+            points.push((prev_dir, dir, next_dir, point));
+            snake_segment_path(canvas_ctx, point.x, point.y, xscale, yscale, prev_dir, dir, next_dir, true);
         }
+        points.reverse();
+        for (prev_dir, dir, next_dir, point) in points.iter() {
+            snake_segment_path(canvas_ctx, point.x, point.y, xscale, yscale, *prev_dir, *dir, *next_dir, false);
+        }
+        canvas_ctx.close_path();
+        canvas_ctx.set_fill_style(&JsValue::from_str(pid_to_color(*pid)));
+        canvas_ctx.fill();
+        canvas_ctx.set_stroke_style(&JsValue::from_str(&"#101010"));
+        canvas_ctx.stroke();
     }
 }
 
