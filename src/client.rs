@@ -3,7 +3,7 @@
 #[macro_use] extern crate serde_derive;
 
 use js_sys::{ArrayBuffer, Uint8Array};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::mpsc;
 use web_sys::{Blob, Event, FileReader, KeyEvent, KeyboardEvent, MessageEvent};
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
@@ -17,17 +17,73 @@ fn log(msg: &str) {
     web_sys::console::log_1(&JsValue::from_str(msg));
 }
 
-fn regular_polygon_path(canvas_ctx: &CanvasRenderingContext2d, n: usize, c_x: f64, c_y: f64, r_x: f64, r_y: f64, start_angle: f64) {
+fn regular_polygon_path<F: Fn(f64, f64) -> (f64, f64)>(canvas_ctx: &CanvasRenderingContext2d, n: usize, c_x: f64, c_y: f64, r: &F, start_angle: f64) {
     canvas_ctx.begin_path();
     for i in 0..n {
         let angle = (TAU * i as f64 / n as f64) + start_angle;
-        let x = c_x + r_x * angle.cos();
-        let y = c_y + r_y * angle.sin();
+        let r = r(start_angle, angle);
+        let x = c_x + r.0 * angle.cos();
+        let y = c_y + r.1 * angle.sin();
         if i == 0 {
             canvas_ctx.move_to(x, y);
         } else {
             canvas_ctx.line_to(x, y);
         }
+    }
+    canvas_ctx.close_path();
+}
+
+fn snake_segment_path(canvas_ctx: &CanvasRenderingContext2d, x: f64, y: f64, w: f64, h: f64, prev_dir: Option<Direction>, current_dir: Direction, next_dir: Option<Direction>) {
+    canvas_ctx.begin_path();
+    let head_radius = |theta0: f64, theta: f64| if theta0.cos()*theta.cos() + theta0.sin()*theta.sin() > 0.0 { (w / 2.0,  h / 2.0) } else { (w/3.0, h/3.0) };
+    let r = Vec2::new(w/2.0, h/2.0);
+    let r2 = Vec2::new(w/3.0, h/3.0);
+    let c = Vec2::new(x, y) + r;
+    let theta = Vec2::from_angle(current_dir.radians());
+    let phi = Vec2::from_angle(current_dir.radians() + TAU/4.0);
+    match (prev_dir, next_dir) {
+        (Some(prev_dir), Some(next_dir)) => {
+            let (prev_theta, next_theta) = (prev_dir.radians(), next_dir.radians());
+            let (prev_phi, next_phi) = (prev_theta + TAU / 4.0, next_theta + TAU / 4.0);
+            let center_theta = 0.5 * (Vec2::from_angle(prev_theta) + Vec2::from_angle(next_theta));
+            let center_phi = Vec2::new(-center_theta.y, center_theta.x);
+            let mid_prev = c - r * Vec2::from_angle(prev_theta);
+            let mid_next = c + r * Vec2::from_angle(next_theta);
+            let p0a = mid_prev - r2 * Vec2::from_angle(prev_phi);
+            let p0b = mid_prev + r2 * Vec2::from_angle(prev_phi);
+            let ca = c - r2 * center_phi;
+            let cb = c + r2 * center_phi;
+            let p2a = mid_next - r2 * Vec2::from_angle(next_phi);
+            let p2b = mid_next + r2 * Vec2::from_angle(next_phi);
+            canvas_ctx.move_to(p0a.x, p0a.y);
+            canvas_ctx.quadratic_curve_to(ca.x, ca.y, p2a.x, p2a.y);
+            canvas_ctx.line_to(p2b.x, p2b.y);
+            canvas_ctx.quadratic_curve_to(cb.x, cb.y, p0b.x, p0b.y);
+            canvas_ctx.line_to(p0a.x, p0a.y);
+        },
+        (_, None) => {
+            let p0 = c + r * theta;
+            let mouth_a = p0 - r2 * phi;
+            let mouth_b = p0 + r2 * phi;
+            let side_a = c - 1.1 * r * phi;
+            let side_b = c + 1.1 * r * phi;
+            let p1 = c - r * theta - r2 * phi;
+            let p2 = c - r * theta + r2 * phi;
+            let p3 = c;
+            canvas_ctx.move_to(p1.x, p1.y);
+            canvas_ctx.quadratic_curve_to(side_a.x, side_a.y, mouth_a.x, mouth_a.y);
+            canvas_ctx.line_to(p3.x, p3.y);
+            canvas_ctx.line_to(mouth_b.x, mouth_b.y);
+            canvas_ctx.quadratic_curve_to(side_b.x, side_b.y, p2.x, p2.y);
+        },
+        (None, Some(_)) => {
+            let p0 = c + r * theta;
+            let p1 = p0 - r2 * phi;
+            let p2 = p0 + r2 * phi;
+            let p3 = c - r * theta;
+            canvas_ctx.move_to(p1.x, p1.y);
+            canvas_ctx.quadratic_curve_to(p3.x, p3.y, p2.x, p2.y);
+        },
     }
     canvas_ctx.close_path();
 }
@@ -46,10 +102,10 @@ fn pid_to_color(pid: PlayerId) -> &'static str {
     }
 }
 
-fn render_tile(canvas_ctx: &CanvasRenderingContext2d, x: f64, y: f64, w: f64, h: f64, tile: Tile) {
+fn render_tile(canvas_ctx: &CanvasRenderingContext2d, x: f64, y: f64, w: f64, h: f64, board: &Board, coord: Coord) {
     use Tile::*;
     // TODO: cache colors
-    match tile {
+    match board[coord] {
         Empty => {
             canvas_ctx.set_fill_style(&JsValue::from_str(&"#f0f0f0"));
             canvas_ctx.fill_rect(x, y, w, h);
@@ -58,20 +114,13 @@ fn render_tile(canvas_ctx: &CanvasRenderingContext2d, x: f64, y: f64, w: f64, h:
             canvas_ctx.set_fill_style(&JsValue::from_str(&"#101010"));
             canvas_ctx.fill_rect(x, y, w, h);
         },
-        WormSegment { pid, dir } => {
-            render_tile(canvas_ctx, x, y, w, h, Tile::Empty);
-            canvas_ctx.set_fill_style(&JsValue::from_str(pid_to_color(pid)));
-            let (r_x, r_y) = match dir {
-                Direction::Left | Direction::Right => (w/2.0, h/4.0),
-                Direction::Up | Direction::Down => (w/4.0, h/2.0),
-            };
-            regular_polygon_path(canvas_ctx, 3, x+(w/2.0), y+(h/2.0), r_x, r_y, dir.radians());
-            canvas_ctx.fill();
-            canvas_ctx.set_stroke_style(&JsValue::from_str(&"#101010"));
-            canvas_ctx.stroke();
+        WormSegment { .. } => {
+            canvas_ctx.set_fill_style(&JsValue::from_str(&"#f0f0f0"));
+            canvas_ctx.fill_rect(x, y, w, h);
         },
         Food => {
-            render_tile(canvas_ctx, x, y, w, h, Tile::Empty);
+            canvas_ctx.set_fill_style(&JsValue::from_str(&"#f0f0f0"));
+            canvas_ctx.fill_rect(x, y, w, h);
             canvas_ctx.set_fill_style(&JsValue::from_str(&"#808000"));
             canvas_ctx.begin_path();
             canvas_ctx.ellipse(x+w/2.0, y+h/2.0, w/4.0, h/4.0, 0.0, 0.0, TAU).unwrap();
@@ -80,13 +129,27 @@ fn render_tile(canvas_ctx: &CanvasRenderingContext2d, x: f64, y: f64, w: f64, h:
     }
 }
 
-fn render_board(canvas: &HtmlCanvasElement, canvas_ctx: &CanvasRenderingContext2d, board: &Board) {
+fn render_board(canvas: &HtmlCanvasElement, canvas_ctx: &CanvasRenderingContext2d, board: &Board, player_segments: &BTreeMap<PlayerId, VecDeque<Coord>>) {
     let xscale = canvas.width() as f64 / board.width as f64;
     let yscale = canvas.height() as f64 / board.height as f64;
 
     for y in 0..board.height {
         for x in 0..board.width {
-            render_tile(canvas_ctx, (x as f64)*xscale, (y as f64)*yscale, xscale, yscale, board[coord(x, y)]);
+            render_tile(canvas_ctx, (x as f64)*xscale, (y as f64)*yscale, xscale, yscale, board, coord(x, y));
+        }
+    }
+    let extract_dir = |coord: &Coord| if let Tile::WormSegment { dir, .. } = board[*coord] { Some(dir) } else { None };
+    for (pid, segments) in player_segments.iter() {
+        for i in 0..segments.len() {
+            let prev_dir = segments.get(i-1).and_then(extract_dir);
+            let dir = extract_dir(&segments[i]).unwrap();
+            let next_dir = if i < segments.len() - 1 { Some(dir) } else { None };
+            let point = segments[i].to_vec2() * Vec2::new(xscale, yscale);
+            canvas_ctx.set_fill_style(&JsValue::from_str(pid_to_color(*pid)));
+            snake_segment_path(canvas_ctx, point.x, point.y, xscale, yscale, prev_dir, dir, next_dir);
+            canvas_ctx.fill();
+            canvas_ctx.set_stroke_style(&JsValue::from_str(&"#101010"));
+            canvas_ctx.stroke();
         }
     }
 }
@@ -203,7 +266,7 @@ pub fn wasm_main() -> Result<JsValue, JsValue> {
         } else {
             last_ts = Some(ts);
         }
-        render_board(&canvas, &canvas_ctx, &gamestate.board);
+        render_board(&canvas, &canvas_ctx, &gamestate.board, &gamestate.player_segments);
     }) as Box<dyn FnMut(f64)>);
     let raf_closure_jsval = raf_closure.as_ref().clone();
     raf_closure.forget();

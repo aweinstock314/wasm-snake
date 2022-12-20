@@ -1,7 +1,7 @@
 use rand::{RngCore, SeedableRng};
 use std::collections::{BTreeMap, VecDeque};
 use std::{cmp::{PartialOrd, Ord}, fmt::Debug};
-use std::ops::{Add, Index, IndexMut};
+use std::ops::{Add, Index, IndexMut, Mul, Neg, Sub};
 use serde::{Serialize, Deserialize};
 
 pub const TAU: f64 = 2.0 * std::f64::consts::PI;
@@ -50,6 +50,9 @@ pub struct PlayerId(pub usize);
 #[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Coord { x: isize, y: isize }
 
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq)]
+pub struct Vec2 { pub x: f64, pub y: f64 }
+
 #[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Direction { Up, Down, Left, Right }
 
@@ -93,12 +96,26 @@ impl Direction {
         }
     }
     pub fn delta_coord(self) -> Coord {
-        let angle = self.radians();
-        signed_coord(angle.cos().round() as _, angle.sin().round() as _)
+        self.delta_vec2().round()
+    }
+    pub fn delta_vec2(self) -> Vec2 {
+        Vec2::from_angle(self.radians())
     }
     pub fn from_u32(x: u32) -> Direction {
         use Direction::*;
         match x % 4 { 0 => Up, 1 => Down, 2 => Left, _ => Right }
+    }
+}
+
+impl Neg for Direction {
+    type Output = Direction;
+    fn neg(self) -> Direction {
+        match self {
+            Direction::Right => Direction::Left,
+            Direction::Down => Direction::Up,
+            Direction::Left => Direction::Right,
+            Direction::Up => Direction::Down,
+        }
     }
 }
 
@@ -110,6 +127,47 @@ fn test_delta_coord() {
     }
 }
 
+impl Vec2 {
+    pub fn new(x: f64, y: f64) -> Vec2 {
+        Vec2 { x, y }
+    }
+    pub fn round(self) -> Coord {
+        Coord { x: self.x.round() as isize, y: self.y.round() as isize }
+    }
+    pub fn from_angle(theta: f64) -> Vec2 {
+        Vec2 { x: theta.cos(), y: theta.sin() }
+    }
+}
+impl Add<Vec2> for Vec2 {
+    type Output = Vec2;
+    fn add(self, rhs: Vec2) -> Vec2 {
+        Vec2 { x: self.x + rhs.x, y: self.y + rhs.y }
+    }
+}
+impl Neg for Vec2 {
+    type Output = Vec2;
+    fn neg(self) -> Vec2 {
+        Vec2 { x: -self.x, y: -self.y}
+    }
+}
+impl Sub<Vec2> for Vec2 {
+    type Output = Vec2;
+    fn sub(self, rhs: Vec2) -> Vec2 {
+        Vec2 { x: self.x - rhs.x, y: self.y - rhs.y }
+    }
+}
+impl Mul<Vec2> for Vec2 {
+    type Output = Vec2;
+    fn mul(self, rhs: Vec2) -> Vec2 {
+        Vec2 { x: self.x * rhs.x, y: self.y * rhs.y }
+    }
+}
+impl Mul<Vec2> for f64 {
+    type Output = Vec2;
+    fn mul(self, rhs: Vec2) -> Vec2 {
+        Vec2 { x: self * rhs.x, y: self * rhs.y }
+    }
+}
 
 pub fn coord(x: usize, y: usize) -> Coord {
     Coord { x: x as _, y: y as _ }
@@ -123,12 +181,27 @@ impl Coord {
     pub fn offset(self, dir: Direction) -> Coord {
         self + dir.delta_coord()
     }
+    pub fn to_vec2(self) -> Vec2 {
+        Vec2::new(self.x as _, self.y as _)
+    }
 }
 
 impl Add<Coord> for Coord {
     type Output = Coord;
     fn add(self, rhs: Coord) -> Coord {
         signed_coord(self.x + rhs.x, self.y + rhs.y)
+    }
+}
+impl Neg for Coord {
+    type Output = Coord;
+    fn neg(self) -> Coord {
+        signed_coord(-self.x, -self.y)
+    }
+}
+impl Sub<Coord> for Coord {
+    type Output = Coord;
+    fn sub(self, rhs: Coord) -> Coord {
+        self + (-rhs)
     }
 }
 impl Index<Coord> for Board {
@@ -214,7 +287,7 @@ impl GameState for SnakeGameState {
             }
         }
         let mut events = vec![];
-        for (pid, segments) in self.player_segments.iter_mut() {
+        for (_, segments) in self.player_segments.iter_mut() {
             if let Some(head) = segments.back() {
                 let (new_events, new_segment) = self.board.move_head(*head);
                 if let Some(s) = new_segment {
